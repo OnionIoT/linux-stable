@@ -1150,6 +1150,8 @@ static u8 spi_nor_convert_3to4_erase(u8 opcode)
 
 static bool spi_nor_has_uniform_erase(const struct spi_nor *nor)
 {
+	if (IS_ENABLED(CONFIG_MTD_SPI_NOR_USE_VARIABLE_ERASE))
+		return false;
 	return !!nor->params->erase_map.uniform_erase_type;
 }
 
@@ -2015,6 +2017,7 @@ static const struct spi_nor_manufacturer *manufacturers[] = {
 	&spi_nor_winbond,
 	&spi_nor_xilinx,
 	&spi_nor_xmc,
+	&spi_nor_xtx,
 };
 
 static const struct flash_info spi_nor_generic_flash = {
@@ -2582,6 +2585,7 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 {
 	struct spi_nor_erase_map *map = &nor->params->erase_map;
 	const struct spi_nor_erase_type *erase = NULL;
+	const struct spi_nor_erase_type *erase_minor = NULL;
 	struct mtd_info *mtd = &nor->mtd;
 	u32 wanted_size = nor->info->sector_size;
 	int i;
@@ -2614,8 +2618,9 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 	 */
 	for (i = SNOR_ERASE_TYPE_MAX - 1; i >= 0; i--) {
 		if (map->erase_type[i].size) {
-			erase = &map->erase_type[i];
-			break;
+			if (!erase)
+				erase = &map->erase_type[i];
+			erase_minor = &map->erase_type[i];
 		}
 	}
 
@@ -2623,6 +2628,9 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 		return -EINVAL;
 
 	mtd->erasesize = erase->size;
+	if (IS_ENABLED(CONFIG_MTD_SPI_NOR_USE_VARIABLE_ERASE) &&
+			erase_minor && erase_minor->size < erase->size)
+		mtd->erasesize_minor = erase_minor->size;
 	return 0;
 }
 
@@ -3216,8 +3224,18 @@ static int spi_nor_init(struct spi_nor *nor)
 		 * reboots (e.g., crashes). Warn the user (or hopefully, system
 		 * designer) that this is bad.
 		 */
+		/* Hack by luz@plan44.ch: prevent this (vebose) warning; when targeting
+		   a third-party platform with this hardware bug, and no way to fix it,
+		   the reminder does not help and clutters the log. So we just output a
+		   one-line warning message instead.
+		 */
+		/*
 		WARN_ONCE(nor->flags & SNOR_F_BROKEN_RESET,
 			  "enabling reset hack; may not recover from unexpected reboots\n");
+		 */
+		if (nor->flags & SNOR_F_BROKEN_RESET) {
+  		dev_warn(nor->dev, "enabling broken reset hack; may not recover from unexpected reboots\n");
+		}
 		err = spi_nor_set_4byte_addr_mode(nor, true);
 		if (err)
 			return err;

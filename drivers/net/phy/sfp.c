@@ -191,7 +191,7 @@ static const enum gpiod_flags gpio_flags[] = {
  * R_PHY_RETRY is the number of attempts.
  */
 #define T_PHY_RETRY		msecs_to_jiffies(50)
-#define R_PHY_RETRY		12
+#define R_PHY_RETRY		25
 
 /* SFP module presence detection is poor: the three MOD DEF signals are
  * the same length on the PCB, which means it's possible for MOD DEF 0 to
@@ -274,6 +274,7 @@ struct sfp {
 	unsigned int module_power_mW;
 	unsigned int module_t_start_up;
 	unsigned int module_t_wait;
+	unsigned int phy_t_retry;
 
 	unsigned int rate_kbd;
 	unsigned int rs_threshold_kbd;
@@ -357,18 +358,33 @@ static void sfp_fixup_10gbaset_30m(struct sfp *sfp)
 	sfp->id.base.extended_cc = SFF8024_ECC_10GBASE_T_SR;
 }
 
-static void sfp_fixup_rollball_proto(struct sfp *sfp, unsigned int secs)
+static void sfp_fixup_rollball(struct sfp *sfp)
 {
 	sfp->mdio_protocol = MDIO_I2C_ROLLBALL;
-	sfp->module_t_wait = msecs_to_jiffies(secs * 1000);
+
+	/* RollBall modules may disallow access to PHY registers for up to 25
+	 * seconds, and the reads return 0xffff before that. Increase the time
+	 * between PHY probe retries from 50ms to 1s so that we will wait for
+	 * the PHY for a sufficient amount of time.
+	 */
+	sfp->phy_t_retry = msecs_to_jiffies(1000);
+}
+
+static void sfp_fixup_rollball_wait4s(struct sfp *sfp)
+{
+	sfp_fixup_rollball(sfp);
+
+	/* The RollBall fixup is not enough for FS modules, the PHY chip inside
+	 * them does not return 0xffff for PHY ID registers in all MMDs for the
+	 * while initializing. They need a 4 second wait before accessing PHY.
+	 */
+	sfp->module_t_wait = msecs_to_jiffies(4000);
 }
 
 static void sfp_fixup_fs_10gt(struct sfp *sfp)
 {
 	sfp_fixup_10gbaset_30m(sfp);
-
-	// These SFPs need 4 seconds before the PHY can be accessed
-	sfp_fixup_rollball_proto(sfp, 4);
+	sfp_fixup_rollball_wait4s(sfp);
 }
 
 static void sfp_fixup_halny_gsfp(struct sfp *sfp)
@@ -378,12 +394,6 @@ static void sfp_fixup_halny_gsfp(struct sfp *sfp)
 	 * module, e.g. a serial port.
 	 */
 	sfp->state_hw_mask &= ~(SFP_F_TX_FAULT | SFP_F_LOS);
-}
-
-static void sfp_fixup_rollball(struct sfp *sfp)
-{
-	// Rollball SFPs need 25 seconds before the PHY can be accessed
-	sfp_fixup_rollball_proto(sfp, 25);
 }
 
 static void sfp_fixup_rollball_cc(struct sfp *sfp)
@@ -449,9 +459,15 @@ static const struct sfp_quirk sfp_quirks[] = {
 	SFP_QUIRK("ALCATELLUCENT", "3FE46541AA", sfp_quirk_2500basex,
 		  sfp_fixup_long_startup),
 
-	// Fiberstore SFP-10G-T doesn't identify as copper, and uses the
-	// Rollball protocol to talk to the PHY.
+	// Fiberstore SFP-10G-T doesn't identify as copper, uses the Rollball
+	// protocol to talk to the PHY and needs 4 sec wait before probing the
+	// PHY.
 	SFP_QUIRK_F("FS", "SFP-10G-T", sfp_fixup_fs_10gt),
+
+	// Fiberstore SFP-2.5G-T and SFP-10GM-T uses Rollball protocol to talk
+	// to the PHY and needs 4 sec wait before probing the PHY.
+	SFP_QUIRK_F("FS", "SFP-2.5G-T", sfp_fixup_rollball_wait4s),
+	SFP_QUIRK_F("FS", "SFP-10GM-T", sfp_fixup_rollball_wait4s),
 
 	// Fiberstore GPON-ONU-34-20BI can operate at 2500base-X, but report 1.2GBd
 	// NRZ in their EEPROM
@@ -469,8 +485,8 @@ static const struct sfp_quirk sfp_quirks[] = {
 	SFP_QUIRK("HUAWEI", "MA5671A", sfp_quirk_2500basex,
 		  sfp_fixup_ignore_tx_fault),
 
-	// FS 2.5G Base-T
-	SFP_QUIRK_M("FS", "SFP-2.5G-T", sfp_quirk_oem_2_5g),
+	// OEM SFP-GE-T is 1000Base-T module
+	SFP_QUIRK_F("OEM", "SFP-GE-T", sfp_fixup_ignore_tx_fault),
 
 	// Lantech 8330-262D-E can operate at 2500base-X, but incorrectly report
 	// 2500MBd NRZ in their EEPROM
@@ -2322,6 +2338,7 @@ static int sfp_sm_mod_probe(struct sfp *sfp, bool report)
 
 	sfp->module_t_start_up = T_START_UP;
 	sfp->module_t_wait = T_WAIT;
+	sfp->phy_t_retry = T_PHY_RETRY;
 
 	sfp->tx_fault_ignore = false;
 
@@ -2592,7 +2609,8 @@ static void sfp_sm_main(struct sfp *sfp, unsigned int event)
 			 * or t_start_up, so assume there is a fault.
 			 */
 			sfp_sm_fault(sfp, SFP_S_INIT_TX_FAULT,
-				     sfp->sm_fault_retries == N_FAULT_INIT);
+				     !sfp->tx_fault_ignore &&
+				     (sfp->sm_fault_retries == N_FAULT_INIT));
 		} else if (event == SFP_E_TIMEOUT || event == SFP_E_TX_CLEAR) {
 	init_done:
 			/* Create mdiobus and start trying for PHY */
@@ -2616,7 +2634,11 @@ static void sfp_sm_main(struct sfp *sfp, unsigned int event)
 		ret = sfp_sm_probe_for_phy(sfp);
 		if (ret == -ENODEV) {
 			if (--sfp->sm_phy_retries) {
-				sfp_sm_next(sfp, SFP_S_INIT_PHY, T_PHY_RETRY);
+				sfp_sm_next(sfp, SFP_S_INIT_PHY,
+					    sfp->phy_t_retry);
+				dev_dbg(sfp->dev,
+					"no PHY detected, %u tries left\n",
+					sfp->sm_phy_retries);
 				break;
 			} else {
 				dev_info(sfp->dev, "no PHY detected\n");
@@ -2846,10 +2868,12 @@ static void sfp_check_state(struct sfp *sfp)
 	mutex_lock(&sfp->st_mutex);
 	state = sfp_get_state(sfp);
 	changed = state ^ sfp->state;
-	if (sfp->tx_fault_ignore)
+	if (sfp->tx_fault_ignore) {
 		changed &= SFP_F_PRESENT | SFP_F_LOS;
-	else
+		state &= ~SFP_F_TX_FAULT;
+	} else {
 		changed &= SFP_F_PRESENT | SFP_F_LOS | SFP_F_TX_FAULT;
+	}
 
 	for (i = 0; i < GPIO_MAX; i++)
 		if (changed & BIT(i))

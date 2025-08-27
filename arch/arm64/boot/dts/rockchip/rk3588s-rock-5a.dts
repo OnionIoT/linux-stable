@@ -8,13 +8,17 @@
 #include "rk3588s.dtsi"
 
 / {
-	model = "Radxa ROCK 5 Model A";
+	model = "Radxa ROCK 5A";
 	compatible = "radxa,rock-5a", "rockchip,rk3588s";
 
 	aliases {
 		mmc0 = &sdhci;
 		mmc1 = &sdmmc;
-		serial2 = &uart2;
+
+		led-boot = &status_led;
+		led-failsafe = &status_led;
+		led-running = &status_led;
+		led-upgrade = &status_led;
 	};
 
 	analog-sound {
@@ -40,11 +44,10 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&io_led>;
 
-		io-led {
+		status_led: io-led {
 			color = <LED_COLOR_ID_BLUE>;
 			function = LED_FUNCTION_STATUS;
 			gpios = <&gpio3 RK_PD5 GPIO_ACTIVE_HIGH>;
-			linux,default-trigger = "heartbeat";
 		};
 	};
 
@@ -63,6 +66,18 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <12000000>;
 		regulator-max-microvolt = <12000000>;
+	};
+
+	vcc3v3_wf: vcc3v3-wf-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_wf";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		gpio = <&gpio0 RK_PC5 GPIO_ACTIVE_HIGH>;
+		pinctrl-0 = <&pow_en>;
+		pinctrl-names = "default";
+		vin-supply = <&vcc5v0_sys>;
 	};
 
 	vcc5v0_host: vcc5v0-host-regulator {
@@ -112,6 +127,14 @@
 		regulator-max-microvolt = <1100000>;
 		vin-supply = <&vcc5v0_sys>;
 	};
+};
+
+&combphy0_ps {
+	status = "okay";
+};
+
+&combphy2_psu {
+	status = "okay";
 };
 
 &cpu_b0 {
@@ -289,10 +312,24 @@
 	};
 };
 
+&pcie2x1l2 {
+	pinctrl-0 = <&pcie20x1m0_pins>;
+	pinctrl-names = "default";
+	reset-gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc3v3_wf>;
+	status = "okay";
+};
+
 &pinctrl {
 	leds {
 		io_led: io-led {
 			rockchip,pins = <3 RK_PD5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	pcie {
+		pow_en: pow-en {
+			rockchip,pins = <0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
@@ -367,10 +404,23 @@
 	max-frequency = <150000000>;
 	no-sdio;
 	no-mmc;
-	sd-uhs-sdr104;
+	sd-uhs-sdr50;
 	vmmc-supply = <&vcc_3v3_s0>;
 	vqmmc-supply = <&vccio_sd_s0>;
 	status = "okay";
+};
+
+&sfc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&fspim0_pins>;
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <104000000>;
+		spi-rx-bus-width = <4>;
+		spi-tx-bus-width = <1>;
+	};
 };
 
 &spi2 {
@@ -695,6 +745,18 @@
 	};
 };
 
+&tsadc {
+	status = "okay";
+};
+
+&u2phy0 {
+	status = "okay";
+};
+
+&u2phy0_otg {
+	status = "okay";
+};
+
 &u2phy2 {
 	status = "okay";
 };
@@ -718,6 +780,11 @@
 	status = "okay";
 };
 
+&usbdp_phy0 {
+	status = "okay";
+	rockchip,dp-lane-mux = <2 3>;
+};
+
 &usb_host0_ehci {
 	status = "okay";
 	pinctrl-names = "default";
@@ -728,10 +795,19 @@
 	status = "okay";
 };
 
+&usb_host0_xhci {
+	dr_mode = "host";
+	status = "okay";
+};
+
 &usb_host1_ehci {
 	status = "okay";
 };
 
 &usb_host1_ohci {
+	status = "okay";
+};
+
+&usb_host2_xhci {
 	status = "okay";
 };

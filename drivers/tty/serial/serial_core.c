@@ -1026,12 +1026,19 @@ static int uart_set_info(struct tty_struct *tty, struct tty_port *port,
 			 * If they're setting up a custom divisor or speed,
 			 * instead of clearing it, then bitch about it.
 			 */
+			/* luz 2024-11-29: disabled the bitching
+			 * We NEED custom speeds for long break emulation and
+			 * change speeds often, so this fills the log quite
+			 * heavily.
+			 */
+			/*
 			if (uport->flags & UPF_SPD_MASK) {
 				dev_notice_ratelimited(uport->dev,
 				       "%s sets custom speed on %s. This is deprecated.\n",
 				      current->comm,
 				      tty_name(port->tty));
 			}
+			*/
 			uart_change_line_settings(tty, state, NULL);
 		}
 	} else {

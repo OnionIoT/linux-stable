@@ -16,7 +16,6 @@
 
 	aliases {
 		mmc0 = &sdhci;
-		serial2 = &uart2;
 	};
 
 	chosen {
@@ -805,6 +804,10 @@
 };
 
 &sata0 {
+	status = "okay";
+};
+
+&tsadc {
 	status = "okay";
 };
 
