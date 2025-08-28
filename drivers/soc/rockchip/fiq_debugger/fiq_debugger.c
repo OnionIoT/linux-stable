@@ -15,7 +15,7 @@
  * GNU General Public License for more details.
  */
 
-#include <stdarg.h>
+#include <linux/stdarg.h>
 #include <linux/module.h>
 #include <linux/io.h>
 #include <linux/console.h>
@@ -50,6 +50,7 @@
 #endif
 
 #include <linux/uaccess.h>
+#include <linux/cpuhotplug.h>
 
 #include "fiq_debugger.h"
 #include "fiq_debugger_priv.h"
@@ -148,10 +149,7 @@ static bool initial_debug_enable;
 static bool initial_console_enable;
 #endif
 
-#ifdef CONFIG_FIQ_DEBUGGER_TRUST_ZONE
-static struct fiq_debugger_state *state_tf;
-#endif
-
+static struct fiq_debugger_state *g_state;
 static bool fiq_kgdb_enable;
 static bool fiq_debugger_disable;
 
@@ -263,11 +261,10 @@ static void fiq_debugger_dump_kernel_log(struct fiq_debugger_state *state)
 {
 	char buf[512];
 	size_t len;
-	struct kmsg_dumper dumper = { .active = true };
+	struct kmsg_dump_iter iter;
 
-
-	kmsg_dump_rewind_nolock(&dumper);
-	while (kmsg_dump_get_line_nolock(&dumper, true, buf,
+	kmsg_dump_rewind(&iter);
+	while (kmsg_dump_get_line(&iter, true, buf,
 					 sizeof(buf) - 1, &len)) {
 		buf[len] = 0;
 		fiq_debugger_puts(state, buf);
@@ -321,14 +318,14 @@ static void fiq_debugger_dump_irqs(struct fiq_debugger_state *state)
 			"irqnr       total  since-last   status  name\n");
 	for_each_irq_desc(n, desc) {
 		struct irqaction *act = desc->action;
-		if (!act && !kstat_irqs(n))
+		if (!act && !kstat_irqs_usr(n))
 			continue;
 		fiq_debugger_printf(&state->output, "%5d: %10u %11u %8x  %s\n", n,
-			kstat_irqs(n),
-			kstat_irqs(n) - state->last_irqs[n],
+			kstat_irqs_usr(n),
+			kstat_irqs_usr(n) - state->last_irqs[n],
 			desc->status_use_accessors,
 			(act && act->name) ? act->name : "???");
-		state->last_irqs[n] = kstat_irqs(n);
+		state->last_irqs[n] = kstat_irqs_usr(n);
 	}
 }
 #endif
@@ -344,7 +341,7 @@ static void fiq_debugger_do_ps(struct fiq_debugger_state *state)
 	fiq_debugger_printf(&state->output, "pid   ppid  prio task            pc\n");
 	read_lock(&tasklist_lock);
 	do_each_thread(g, p) {
-		task_state = p->state ? __ffs(p->state) + 1 : 0;
+		task_state = p->__state ? __ffs(p->__state) + 1 : 0;
 		fiq_debugger_printf(&state->output,
 			     "%5d %5d %4d ", p->pid, p->parent->pid, p->prio);
 		fiq_debugger_printf(&state->output, "%-13.13s %c", p->comm,
@@ -1077,7 +1074,7 @@ static void fiq_debugger_fiq(struct fiq_glue_handler *h,
 #ifdef CONFIG_FIQ_DEBUGGER_TRUST_ZONE
 void fiq_debugger_fiq(void *regs, u32 cpu)
 {
-	struct fiq_debugger_state *state = state_tf;
+	struct fiq_debugger_state *state = g_state;
 	bool need_irq;
 
 	if (!state)
@@ -1240,7 +1237,7 @@ static int fiq_tty_write(struct tty_struct *tty, const unsigned char *buf, int c
 	return count;
 }
 
-static int fiq_tty_write_room(struct tty_struct *tty)
+static unsigned int fiq_tty_write_room(struct tty_struct *tty)
 {
 #ifdef CONFIG_RK_CONSOLE_THREAD
 	int line = tty->index;
@@ -1378,7 +1375,7 @@ static int fiq_debugger_tty_init(void)
 	return 0;
 
 err_free_tty:
-	put_tty_driver(fiq_tty_driver);
+	tty_driver_kref_put(fiq_tty_driver);
 	fiq_tty_driver = NULL;
 err_free_state:
 	kfree(states);
@@ -1444,6 +1441,18 @@ static int fiq_debugger_dev_resume(struct device *dev)
 	return 0;
 }
 
+static int fiq_debugger_cpu_offine_migrate_irq(unsigned int cpu)
+{
+	if (g_state && cpu == g_state->current_cpu) {
+		unsigned int new_cpu = cpumask_any_but(cpu_online_mask, cpu);
+
+		if (new_cpu < nr_cpu_ids)
+			g_state->current_cpu = new_cpu;
+	}
+
+	return 0;
+}
+
 static int fiq_debugger_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -1451,6 +1460,7 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 	struct fiq_debugger_state *state;
 	int fiq;
 	int uart_irq;
+	enum cpuhp_state cs = -1;
 
 	if (pdev->id >= MAX_FIQ_DEBUGGER_PORTS)
 		return -EINVAL;
@@ -1556,7 +1566,7 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 			pr_err("%s: could not install nmi irq handler\n", __func__);
 			irq_clear_status_flags(state->uart_irq, IRQ_NOAUTOEN);
 			ret = request_irq(state->uart_irq, fiq_debugger_uart_irq,
-					  IRQF_NO_SUSPEND, "debug", state);
+					  IRQF_NO_SUSPEND | IRQF_NOBALANCING, "debug", state);
 		} else {
 			enable_nmi(state->uart_irq);
 		}
@@ -1570,6 +1580,15 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 		 * can.
 		 */
 		enable_irq_wake(state->uart_irq);
+
+		ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+						"soc/fiq_debugger",
+						NULL,
+						fiq_debugger_cpu_offine_migrate_irq);
+		if (ret < 0)
+			pr_err("%s: could not setup cpu offine handler\n", __func__);
+		else
+			cs = ret;
 	}
 
 	if (state->signal_irq >= 0) {
@@ -1600,10 +1619,6 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 	if (state->no_sleep)
 		fiq_debugger_handle_wakeup(state);
 
-#ifdef CONFIG_FIQ_DEBUGGER_TRUST_ZONE
-	state_tf = state;
-#endif
-
 	if (pdata->uart_init) {
 		ret = pdata->uart_init(pdev);
 		if (ret)
@@ -1630,7 +1645,7 @@ console_out:
 
 	/* switch to cpu0 default */
 	fiq_debugger_switch_cpu(state, 0);
-
+	g_state = state;
 	return 0;
 
 err_register_irq:
@@ -1641,6 +1656,8 @@ err_uart_init:
 		clk_disable(state->clk);
 	if (state->clk)
 		clk_put(state->clk);
+	if (cs >= 0)
+		cpuhp_remove_state_nocalls(cs);
 	wakeup_source_remove(&state->debugger_wake_src);
 	__pm_relax(&state->debugger_wake_src);
 	platform_set_drvdata(pdev, NULL);
