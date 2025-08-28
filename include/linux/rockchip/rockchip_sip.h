@@ -33,6 +33,7 @@
 #define PSCI_SIP_VPU_RESET		0x8200000c
 #define SIP_BUS_CFG			0x8200000d
 #define SIP_LAST_LOG			0x8200000e
+#define SIP_ACCESS_MEM_OS_REG		0x8200000f
 #define SIP_SCMI_AGENT0			0x82000010
 #define SIP_SCMI_AGENT1			0x82000011
 #define SIP_SCMI_AGENT2			0x82000012
@@ -56,6 +57,8 @@
 #define SIP_HDCP_CONFIG			0x82000025
 #define SIP_WDT_CFG			0x82000026
 #define SIP_HDMIRX_CFG			0x82000027
+#define SIP_MCU_CFG			0x82000028
+#define SIP_PVTPLL_CFG			0x82000029
 
 #define TRUSTED_OS_HDCPKEY_INIT		0xB7000003
 
@@ -108,6 +111,13 @@
 #define LINUX_PM_STATE			0x09
 #define SUSPEND_IO_RET_CONFIG		0x0a
 #define SLEEP_PIN_CONFIG		0x0b
+#define SLEEP_IO_CONFIG			0x0c
+
+enum {
+	RK_PM_SLEEP_IO_CFG_CNT = 0,
+	RK_PM_SLEEP_IO_CFG_VAL = 1,
+	RK_PM_SLEEP_IO_CFG_MAX,
+};
 
 /* SIP_REMOTECTL_CFG call types */
 #define	REMOTECTL_SET_IRQ		0xf0
@@ -117,6 +127,34 @@
 #define REMOTECTL_ENABLE		0xf4
 /* wakeup state */
 #define REMOTECTL_PWRKEY_WAKEUP		0xdeadbeaf
+
+/* SIP_ACCESS_MEM_OS_REG child configs */
+enum {
+	RK_MEM_OS_REG_READ = 0,
+	RK_MEM_OS_REG_WRITE,
+};
+
+/* SIP_MCU_CFG child configs, MCU ID */
+enum {
+	RK_BUS_MCU,
+	RK_PMU_MCU,
+	RK_DDR_MCU,
+	RK_NPU_MCU,
+};
+
+#define RK_SIP_MCU_ID(type, id)		((type) << 8 | id)
+
+#define RK_SIP_CFG_BUSMCU_0_ID		RK_SIP_MCU_ID(RK_BUS_MCU, 0)
+#define RK_SIP_CFG_BUSMCU_1_ID		RK_SIP_MCU_ID(RK_BUS_MCU, 1)
+#define RK_SIP_CFG_PMUMCU_0_ID		RK_SIP_MCU_ID(RK_PMU_MCU, 0)
+#define RK_SIP_CFG_DDRMCU_0_ID		RK_SIP_MCU_ID(RK_DDR_MCU, 0)
+#define RK_SIP_CFG_NPUMCU_0_ID		RK_SIP_MCU_ID(RK_NPU_MCU, 0)
+
+/* SIP_MCU_CFG child configs */
+#define CONFIG_MCU_CODE_START_ADDR	0x01
+#define CONFIG_MCU_EXPERI_START_ADDR	0x02
+#define CONFIG_MCU_SRAM_START_ADDR	0x03
+#define CONFIG_MCU_EXSRAM_START_ADDR	0x04
 
 struct dram_addrmap_info {
 	u64 ch_mask[2];
@@ -203,6 +241,14 @@ enum {
 	HDMIRX_INFO_NOTIFY = 2,
 };
 
+/* SIP_PVTPLL_CFG child configs */
+enum {
+	PVTPLL_GET_INFO = 0,
+	PVTPLL_ADJUST_TABLE = 1,
+	PVTPLL_LOW_TEMP = 2,
+	PVTPLL_VOLT_SEL = 3,
+};
+
 struct pt_regs;
 typedef void (*sip_fiq_debugger_uart_irq_tf_cb_t)(struct pt_regs *_pt_regs, unsigned long cpu);
 
@@ -231,8 +277,12 @@ int sip_smc_secure_reg_write(u32 addr_phy, u32 val);
 u32 sip_smc_secure_reg_read(u32 addr_phy);
 struct arm_smccc_res sip_smc_bus_config(u32 arg0, u32 arg1, u32 arg2);
 struct dram_addrmap_info *sip_smc_get_dram_map(void);
+int sip_smc_access_mem_os_reg(u32 func, u32 id, u32 *val);
 int sip_smc_amp_config(u32 sub_func_id, u32 arg1, u32 arg2, u32 arg3);
 struct arm_smccc_res sip_smc_get_amp_info(u32 sub_func_id, u32 arg1);
+struct arm_smccc_res sip_smc_get_pvtpll_info(u32 sub_func_id, u32 arg1);
+struct arm_smccc_res sip_smc_pvtpll_config(u32 sub_func_id, u32 arg1, u32 arg2,
+					   u32 arg3, u32 arg4, u32 arg5, u32 arg6);
 
 void __iomem *sip_hdcp_request_share_memory(int id);
 struct arm_smccc_res sip_hdcp_config(u32 arg0, u32 arg1, u32 arg2);
@@ -252,6 +302,7 @@ int sip_fiq_control(u32 sub_func, u32 irq, unsigned long data);
 int sip_wdt_config(u32 sub_func, u32 arg1, u32 arg2, u32 arg3);
 int sip_hdmirx_config(u32 sub_func, u32 arg1, u32 arg2, u32 arg3);
 int sip_hdcpkey_init(u32 hdcp_id);
+int sip_smc_mcu_config(unsigned long mcu_id, unsigned long func, unsigned long arg2);
 #else
 static inline struct arm_smccc_res sip_smc_get_atf_version(void)
 {
@@ -325,6 +376,13 @@ static inline struct dram_addrmap_info *sip_smc_get_dram_map(void)
 	return NULL;
 }
 
+static inline int sip_smc_access_mem_os_reg(u32 func,
+					    u32 id,
+					    u32 *val)
+{
+	return 0;
+}
+
 static inline int sip_smc_amp_config(u32 sub_func_id,
 				     u32 arg1,
 				     u32 arg2,
@@ -335,6 +393,24 @@ static inline int sip_smc_amp_config(u32 sub_func_id,
 
 static inline struct arm_smccc_res sip_smc_get_amp_info(u32 sub_func_id,
 							u32 arg1)
+{
+	struct arm_smccc_res tmp = { .a0 = SIP_RET_NOT_SUPPORTED, };
+
+	return tmp;
+}
+
+static inline struct arm_smccc_res sip_smc_get_pvtpll_info(u32 sub_func_id,
+							   u32 arg1)
+{
+	struct arm_smccc_res tmp = { .a0 = SIP_RET_NOT_SUPPORTED, };
+
+	return tmp;
+}
+
+static inline struct arm_smccc_res sip_smc_pvtpll_config(u32 sub_func_id,
+							 u32 arg1, u32 arg2,
+							 u32 arg3, u32 arg4,
+							 u32 arg5, u32 arg6)
 {
 	struct arm_smccc_res tmp = { .a0 = SIP_RET_NOT_SUPPORTED, };
 
@@ -407,6 +483,13 @@ static inline int sip_hdmirx_config(u32 sub_func,
 static inline int sip_hdcpkey_init(u32 hdcp_id)
 {
 	return 0;
+}
+
+static inline int sip_smc_mcu_config(unsigned long mcu_id,
+				     unsigned long func,
+				     unsigned long arg2)
+{
+	return SIP_RET_NOT_SUPPORTED;
 }
 #endif
 
