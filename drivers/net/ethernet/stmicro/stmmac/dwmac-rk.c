@@ -14,15 +14,17 @@
 #include <linux/of_net.h>
 #include <linux/gpio.h>
 #include <linux/module.h>
-#include <linux/of.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/of_gpio.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/delay.h>
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
 #include <linux/pm_runtime.h>
-
+#include <linux/soc/rockchip/rk_vendor_storage.h>
+#include <soc/rockchip/rockchip_csu.h>
 #include "stmmac_platform.h"
 
 struct rk_priv_data;
@@ -81,6 +83,9 @@ struct rk_priv_data {
 
 	struct regmap *grf;
 	struct regmap *php_grf;
+
+	unsigned char otp_data;
+	unsigned int bgs_increment;
 };
 
 #define HIWORD_UPDATE(val, mask, shift) \
@@ -92,6 +97,64 @@ struct rk_priv_data {
 #define DELAY_ENABLE(soc, tx, rx) \
 	(((tx) ? soc##_GMAC_TXCLK_DLY_ENABLE : soc##_GMAC_TXCLK_DLY_DISABLE) | \
 	 ((rx) ? soc##_GMAC_RXCLK_DLY_ENABLE : soc##_GMAC_RXCLK_DLY_DISABLE))
+
+
+/* Integrated FEPHY */
+
+#define RK_FEPHY_SHUTDOWN		GRF_BIT(1)
+#define RK_FEPHY_POWERUP		GRF_CLR_BIT(1)
+#define RK_FEPHY_INTERNAL_RMII_SEL	GRF_BIT(6)
+#define RK_FEPHY_24M_CLK_SEL		(GRF_BIT(8) | GRF_BIT(9))
+#define RK_FEPHY_PHY_ID			GRF_BIT(11)
+
+#define RK_FEPHY_BGS			HIWORD_UPDATE(0x0, 0xf, 0)
+
+#define RK_FEPHY_BGS_MAX		7
+
+static void rk_gmac_integrated_fephy_power(struct rk_priv_data *priv,
+					   unsigned int ctrl_offset,
+					   unsigned int bgs_offset,
+					   bool up)
+{
+	struct device *dev = &priv->pdev->dev;
+
+	if (IS_ERR(priv->grf) || !priv->phy_reset) {
+		dev_err(dev, "%s: Missing rockchip,grf or phy_reset property\n",
+			__func__);
+		return;
+	}
+
+	if (up) {
+		unsigned int bgs = priv->otp_data;
+
+		reset_control_assert(priv->phy_reset);
+		udelay(20);
+		regmap_write(priv->grf, ctrl_offset,
+			     RK_FEPHY_POWERUP |
+			     RK_FEPHY_INTERNAL_RMII_SEL |
+			     RK_FEPHY_24M_CLK_SEL |
+			     RK_FEPHY_PHY_ID);
+
+		if (bgs > (RK_FEPHY_BGS_MAX - priv->bgs_increment) &&
+		    bgs <= RK_FEPHY_BGS_MAX) {
+			bgs = HIWORD_UPDATE(RK_FEPHY_BGS_MAX, 0xf, 0);
+		} else {
+			bgs += priv->bgs_increment;
+			bgs &= 0xf;
+			bgs = HIWORD_UPDATE(bgs, 0xf, 0);
+		}
+
+		regmap_write(priv->grf, bgs_offset, bgs);
+		usleep_range(10 * 1000, 12 * 1000);
+		reset_control_deassert(priv->phy_reset);
+		usleep_range(50 * 1000, 60 * 1000);
+	} else {
+		regmap_write(priv->grf, ctrl_offset,
+			     RK_FEPHY_SHUTDOWN);
+	}
+}
+
+
 
 #define PX30_GRF_GMAC_CON1		0x0904
 
@@ -1265,6 +1328,63 @@ static const struct rk_gmac_ops rk3588_ops = {
 	},
 };
 
+#define RV1106_VOGRF_GMAC_CLK_CON		0X60004
+
+#define RV1106_VOGRF_MACPHY_RMII_MODE		GRF_BIT(0)
+#define RV1106_VOGRF_GMAC_CLK_RMII_DIV2		GRF_BIT(2)
+#define RV1106_VOGRF_GMAC_CLK_RMII_DIV20	GRF_CLR_BIT(2)
+
+#define RV1106_VOGRF_MACPHY_CON0		0X60028
+#define RV1106_VOGRF_MACPHY_CON1		0X6002C
+
+static void rv1106_set_to_rmii(struct rk_priv_data *bsp_priv)
+{
+	struct device *dev = &bsp_priv->pdev->dev;
+
+	if (IS_ERR(bsp_priv->grf)) {
+		dev_err(dev, "%s: Missing rockchip,grf property\n", __func__);
+		return;
+	}
+
+	regmap_write(bsp_priv->grf, RV1106_VOGRF_GMAC_CLK_CON,
+		     RV1106_VOGRF_MACPHY_RMII_MODE |
+		     RV1106_VOGRF_GMAC_CLK_RMII_DIV2);
+}
+
+static void rv1106_set_rmii_speed(struct rk_priv_data *bsp_priv, int speed)
+{
+	struct device *dev = &bsp_priv->pdev->dev;
+	unsigned int val = 0;
+
+	if (IS_ERR(bsp_priv->grf)) {
+		dev_err(dev, "%s: Missing rockchip,grf property\n", __func__);
+		return;
+	}
+
+	if (speed == 10) {
+		val = RV1106_VOGRF_GMAC_CLK_RMII_DIV20;
+	} else if (speed == 100) {
+		val = RV1106_VOGRF_GMAC_CLK_RMII_DIV2;
+	} else {
+		dev_err(dev, "unknown speed value for RMII! speed=%d", speed);
+		return;
+	}
+
+	regmap_write(bsp_priv->grf, RV1106_VOGRF_GMAC_CLK_CON, val);
+}
+
+static void rv1106_integrated_sphy_powerup(struct rk_priv_data *priv)
+{
+	rk_gmac_integrated_fephy_power(priv, RV1106_VOGRF_MACPHY_CON0,
+				       RV1106_VOGRF_MACPHY_CON1, true);
+}
+
+static const struct rk_gmac_ops rv1106_ops = {
+	.set_to_rmii = rv1106_set_to_rmii,
+	.set_rmii_speed = rv1106_set_rmii_speed,
+	.integrated_phy_powerup = rv1106_integrated_sphy_powerup,
+};
+
 #define RV1108_GRF_GMAC_CON0		0X0900
 
 /* RV1108_GRF_GMAC_CON0 */
@@ -1684,10 +1804,45 @@ static struct rk_priv_data *rk_gmac_setup(struct platform_device *pdev,
 		bsp_priv->integrated_phy = of_property_read_bool(plat->phy_node,
 								 "phy-is-integrated");
 		if (bsp_priv->integrated_phy) {
+			unsigned char *efuse_buf;
+			struct nvmem_cell *cell;
+			size_t len;
+
 			bsp_priv->phy_reset = of_reset_control_get(plat->phy_node, NULL);
 			if (IS_ERR(bsp_priv->phy_reset)) {
 				dev_err(&pdev->dev, "No PHY reset control found.\n");
 				bsp_priv->phy_reset = NULL;
+			}
+
+			if (of_property_read_u32(plat->phy_node, "bgs,increment",
+						 &bsp_priv->bgs_increment)) {
+				bsp_priv->bgs_increment = 0;
+			} else {
+				if (bsp_priv->bgs_increment > RK_FEPHY_BGS_MAX) {
+					dev_err(dev, "%s: error bgs increment: %d\n",
+						__func__, bsp_priv->bgs_increment);
+					bsp_priv->bgs_increment = RK_FEPHY_BGS_MAX;
+				}
+			}
+
+			/* Read bgs from OTP if it exists */
+			cell = nvmem_cell_get(dev, "bgs");
+			if (IS_ERR(cell)) {
+				if (PTR_ERR(cell) != -EPROBE_DEFER)
+					dev_info(dev, "failed to get bgs cell: %ld, use default\n",
+						 PTR_ERR(cell));
+				else
+					return ERR_CAST(cell);
+			} else {
+				efuse_buf = nvmem_cell_read(cell, &len);
+				nvmem_cell_put(cell);
+				if (!IS_ERR(efuse_buf)) {
+					if (len == 1)
+						bsp_priv->otp_data = efuse_buf[0];
+					kfree(efuse_buf);
+				} else {
+					dev_err(dev, "failed to get efuse buf, use default\n");
+				}
 			}
 		}
 	}
@@ -1904,19 +2059,48 @@ static int rk_gmac_resume(struct device *dev)
 static SIMPLE_DEV_PM_OPS(rk_gmac_pm_ops, rk_gmac_suspend, rk_gmac_resume);
 
 static const struct of_device_id rk_gmac_dwmac_match[] = {
+#ifdef CONFIG_CPU_PX30
 	{ .compatible = "rockchip,px30-gmac",	.data = &px30_ops   },
+#endif
+#ifdef CONFIG_CPU_RK312X
 	{ .compatible = "rockchip,rk3128-gmac", .data = &rk3128_ops },
+#endif
+#ifdef CONFIG_CPU_RK322X
 	{ .compatible = "rockchip,rk3228-gmac", .data = &rk3228_ops },
+#endif
+#ifdef CONFIG_CPU_RK3288
 	{ .compatible = "rockchip,rk3288-gmac", .data = &rk3288_ops },
+#endif
+#ifdef CONFIG_CPU_RK3308
 	{ .compatible = "rockchip,rk3308-gmac", .data = &rk3308_ops },
+#endif
+#ifdef CONFIG_CPU_RK3328
 	{ .compatible = "rockchip,rk3328-gmac", .data = &rk3328_ops },
+#endif
+#ifdef CONFIG_CPU_RK3366
 	{ .compatible = "rockchip,rk3366-gmac", .data = &rk3366_ops },
+#endif
+#ifdef CONFIG_CPU_RK3368
 	{ .compatible = "rockchip,rk3368-gmac", .data = &rk3368_ops },
+#endif
+#ifdef CONFIG_CPU_RK3399
 	{ .compatible = "rockchip,rk3399-gmac", .data = &rk3399_ops },
+#endif
+#ifdef CONFIG_CPU_RK3568
 	{ .compatible = "rockchip,rk3568-gmac", .data = &rk3568_ops },
+#endif
+#ifdef CONFIG_CPU_RK3588
 	{ .compatible = "rockchip,rk3588-gmac", .data = &rk3588_ops },
+#endif
+#ifdef CONFIG_CPU_RV1106
+	{ .compatible = "rockchip,rv1106-gmac", .data = &rv1106_ops },
+#endif
+#ifdef CONFIG_CPU_RV1108
 	{ .compatible = "rockchip,rv1108-gmac", .data = &rv1108_ops },
+#endif
+#ifdef CONFIG_CPU_RV1126
 	{ .compatible = "rockchip,rv1126-gmac", .data = &rv1126_ops },
+#endif
 	{ }
 };
 MODULE_DEVICE_TABLE(of, rk_gmac_dwmac_match);
