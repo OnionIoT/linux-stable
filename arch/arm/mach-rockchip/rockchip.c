@@ -9,11 +9,15 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/of.h>
 #include <linux/of_clk.h>
+#include <linux/of_platform.h>
+#include <linux/irqchip.h>
 #include <linux/clocksource.h>
+#include <linux/mfd/syscon.h>
+#include <linux/regmap.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
+#include <asm/hardware/cache-l2x0.h>
 #include "core.h"
 #include "pm.h"
 
@@ -58,6 +62,8 @@ static const char * const rockchip_board_dt_compat[] = {
 	"rockchip,rk3188",
 	"rockchip,rk3228",
 	"rockchip,rk3288",
+	"rockchip,rv1103",
+	"rockchip,rv1106",
 	"rockchip,rv1108",
 	NULL,
 };
