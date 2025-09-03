@@ -1,3 +1,22 @@
+Work in progress for rv1103/rv1106 support on Linux 6.6
+=======================================================
+
+This is a fork of linux-stable to work on supporting tiny rockchip SoCs
+rv1103 and rv1106 based on mainline linux 6.6 (rather than android/rockchip
+kernels)
+
+The main use case is for running OpenWrt 24.10 on these rockchips.
+
+Eventually, the work done here on top of v6.6.93 should become
+openwrt kernel patches for the rockchip targets.
+
+Any help, interest, contribution is welcome, please use github issues
+and discussions for communication.
+
+---
+
+original README:
+
 Linux kernel
 ============
 
