@@ -8,7 +8,7 @@
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/rockchip.h>
-#include <dt-bindings/power/rockchip,rv1126-power.h>
+#include <dt-bindings/power/rv1126-power.h>
 #include <dt-bindings/soc/rockchip,boot-mode.h>
 
 / {
