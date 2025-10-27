@@ -1,5 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-
+/* SPDX-License-Identifier: (GPL-2.0+ OR MIT) */
 #ifndef __DT_BINDINGS_POWER_RV1126_POWER_H__
 #define __DT_BINDINGS_POWER_RV1126_POWER_H__
 
@@ -11,7 +10,7 @@
 #define RV1126_PD_CORE_ALIVE	4
 
 /* VD_PMU */
-#define RV1126_PD_PMU		5
+#define RV1126_PD_PMU           5
 #define RV1126_PD_PMU_ALIVE	6
 
 /* VD_NPU */
