@@ -1746,13 +1746,13 @@ static int rk_gmac_clk_init(struct plat_stmmacenet_data *plat)
 	/* "stmmaceth" will be enabled by the core */
 	bsp_priv->clk_mac = devm_clk_get(dev, "stmmaceth");
 	ret = PTR_ERR_OR_ZERO(bsp_priv->clk_mac);
-	if (ret)
-		return dev_err_probe(dev, ret, "Cannot get stmmaceth clock\n");
+	if (ret && !bsp_priv->clock_input)
+		return dev_err_probe(dev, ret, "No clock input from PHY and cannot get stmmaceth clock\n");
 
 	if (bsp_priv->clock_input) {
 		dev_info(dev, "clock input from PHY\n");
 	} else if (phy_iface == PHY_INTERFACE_MODE_RMII) {
-		clk_set_rate(bsp_priv->clk_mac, 50000000);
+		if (!ret) clk_set_rate(bsp_priv->clk_mac, 50000000);
 	}
 
 	if (plat->phy_node && bsp_priv->integrated_phy) {
