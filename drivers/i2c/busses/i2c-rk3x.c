@@ -28,6 +28,14 @@
 #include <linux/delay.h>
 
 
+#define P44_DEBUG_ENABLED 1
+#if P44_DEBUG_ENABLED
+#define P44_DEBUG(dev, msg, ...) dev_info(dev, msg, ##__VA_ARGS__)
+#else
+#define P44_DEBUG(dev, msg, ...)
+#endif
+
+
 /* Register Map */
 #define REG_CON        0x00 /* control register */
 #define REG_CLKDIV     0x04 /* clock divisor register */
@@ -1490,6 +1498,11 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 
 	/* Try to set the I2C adapter number from dt */
 	bus_nr = of_alias_get_id(np, "i2c");
+	P44_DEBUG(i2c->dev, "rk3x_i2c_probe: bus_nr(from alias)=%d, i2c->adap.nr=%d\n", bus_nr, i2c->adap.nr);
+	if (bus_nr<0) {
+	  bus_nr = i2c->adap.nr;
+	  dev_warn(i2c->dev, "could not get bus_nr from alias, using i2c_adap.nr: %d\n", bus_nr);
+	}
 
 	/*
 	 * Switch to new interface if the SoC also offers the old one.
@@ -1500,7 +1513,7 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 
 		grf = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
 		if (!IS_ERR(grf)) {
-			int bus_nr = i2c->adap.nr;
+			//int bus_nr = i2c->adap.nr;
 
 			if (i2c->soc_data == &rv1103b_soc_data && bus_nr == 4)
 				/* rv1103b i2c4 set grf offset-0x8, bit-8 */
