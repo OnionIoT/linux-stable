@@ -36,6 +36,14 @@
 
 #include "ssd130x.h"
 
+#define P44_DEBUG_ENABLED 1
+#if P44_DEBUG_ENABLED
+#define P44_DEBUG(dev, msg, ...) dev_info(dev, msg, ##__VA_ARGS__)
+#else
+#define P44_DEBUG(dev, msg, ...)
+#endif
+
+
 #define DRIVER_NAME	"ssd130x"
 #define DRIVER_DESC	"DRM driver for Solomon SSD130x OLED displays"
 #define DRIVER_DATE	"20220131"
@@ -866,14 +874,19 @@ static int ssd130x_connector_helper_get_modes(struct drm_connector *connector)
 	struct drm_display_mode *mode;
 	struct device *dev = ssd130x->dev;
 
+	P44_DEBUG(dev, "ssd130x_connector_helper_get_modes\n");
+
 	mode = drm_mode_duplicate(connector->dev, &ssd130x->mode);
 	if (!mode) {
 		dev_err(dev, "Failed to duplicated mode\n");
 		return 0;
 	}
 
+	P44_DEBUG(dev, "- ssd130x_connector_helper_get_modes: calling drm_mode_probed_add\n");
 	drm_mode_probed_add(connector, mode);
+	P44_DEBUG(dev, "- ssd130x_connector_helper_get_modes: calling drm_set_preferred_mode\n");
 	drm_set_preferred_mode(connector, mode->hdisplay, mode->vdisplay);
+	P44_DEBUG(dev, "- ssd130x_connector_helper_get_modes: done\n");
 
 	/* There is only a single mode */
 	return 1;
@@ -941,6 +954,8 @@ static void ssd130x_parse_properties(struct ssd130x_device *ssd130x)
 {
 	struct device *dev = ssd130x->dev;
 
+	P44_DEBUG(dev, "ssd130x_parse_properties\n");
+
 	if (device_property_read_u32(dev, "solomon,width", &ssd130x->width))
 		ssd130x->width = ssd130x->device_info->default_width;
 
@@ -983,6 +998,14 @@ static void ssd130x_parse_properties(struct ssd130x_device *ssd130x)
 		ssd130x->dclk_div = ssd130x->device_info->default_dclk_div;
 	if (device_property_read_u32(dev, "solomon,dclk-frq", &ssd130x->dclk_frq))
 		ssd130x->dclk_frq = ssd130x->device_info->default_dclk_frq;
+
+	P44_DEBUG(dev,
+	  "ssd130x_parse_properties, params:\n"
+	  "- width/height = %d/%d\n"
+	  "- page-offset=%d, col-offset=%d, com-offset=%d\n",
+	  ssd130x->width, ssd130x->height,
+	  ssd130x->page_offset, ssd130x->col_offset, ssd130x->com_offset
+	);
 }
 
 static int ssd130x_init_modeset(struct ssd130x_device *ssd130x)
@@ -996,6 +1019,8 @@ static int ssd130x_init_modeset(struct ssd130x_device *ssd130x)
 	struct drm_encoder *encoder;
 	struct drm_connector *connector;
 	int ret;
+
+	P44_DEBUG(dev, "ssd130x_init_modeset\n");
 
 	/*
 	 * Modesetting
@@ -1069,6 +1094,7 @@ static int ssd130x_init_modeset(struct ssd130x_device *ssd130x)
 
 	/* Connector */
 
+	P44_DEBUG(dev, "- ssd130x_init_modeset: calling connector_init\n");
 	connector = &ssd130x->connector;
 	ret = drm_connector_init(drm, connector, &ssd130x_connector_funcs,
 				 DRM_MODE_CONNECTOR_Unknown);
@@ -1077,7 +1103,9 @@ static int ssd130x_init_modeset(struct ssd130x_device *ssd130x)
 		return ret;
 	}
 
+	P44_DEBUG(dev, "- ssd130x_init_modeset: adding connector helpers\n");
 	drm_connector_helper_add(connector, &ssd130x_connector_helper_funcs);
+	P44_DEBUG(dev, "- ssd130x_init_modeset: added connector helpers\n");
 
 	ret = drm_connector_attach_encoder(connector, encoder);
 	if (ret) {
@@ -1085,7 +1113,11 @@ static int ssd130x_init_modeset(struct ssd130x_device *ssd130x)
 		return ret;
 	}
 
+	P44_DEBUG(dev, "- ssd130x_init_modeset: calling drm_mode_config_reset\n");
 	drm_mode_config_reset(drm);
+	P44_DEBUG(dev, "- ssd130x_init_modeset: called drm_mode_config_reset\n");
+
+
 
 	return 0;
 }
@@ -1113,6 +1145,8 @@ struct ssd130x_device *ssd130x_probe(struct device *dev, struct regmap *regmap)
 	struct backlight_device *bl;
 	struct drm_device *drm;
 	int ret;
+
+	P44_DEBUG(dev, "ssd130x_probe\n");
 
 	ssd130x = devm_drm_dev_alloc(dev, &ssd130x_drm_driver,
 				     struct ssd130x_device, drm);
@@ -1145,14 +1179,17 @@ struct ssd130x_device *ssd130x_probe(struct device *dev, struct regmap *regmap)
 	bl->props.max_brightness = MAX_CONTRAST;
 	ssd130x->bl_dev = bl;
 
+	P44_DEBUG(dev, "- ssd130x_probe: calling ssd130x_init_modeset\n");
 	ret = ssd130x_init_modeset(ssd130x);
 	if (ret)
 		return ERR_PTR(ret);
 
+	P44_DEBUG(dev, "- ssd130x_probe: calling drm_dev_register\n");
 	ret = drm_dev_register(drm, 0);
 	if (ret)
 		return ERR_PTR(dev_err_probe(dev, ret, "DRM device register failed\n"));
 
+	P44_DEBUG(dev, "- ssd130x_probe: calling drm_fbdev_generic_setup\n");
 	drm_fbdev_generic_setup(drm, 32);
 
 	return ssd130x;
