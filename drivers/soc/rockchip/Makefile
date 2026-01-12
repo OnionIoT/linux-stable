@@ -34,4 +34,5 @@ obj-$(CONFIG_ROCKCHIP_NPOR_POWERGOOD) += rockchip_npor_powergood.o
 obj-$(CONFIG_RK_CMA_PROCFS) += rk_cma_procfs.o
 obj-$(CONFIG_RK_DMABUF_PROCFS) += rk_dmabuf_procfs.o
 obj-$(CONFIG_RK_MEMBLOCK_PROCFS) += rk_memblock_procfs.o
+obj-$(CONFIG_CPU_RV1106) += rv1106_sdmmc_lock.o
 obj-$(CONFIG_ROCKCHIP_MINIDUMP)	+= minidump/
