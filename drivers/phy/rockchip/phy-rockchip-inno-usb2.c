@@ -294,6 +294,7 @@ struct rockchip_usb2phy_port {
 	bool		utmi_avalid;
 	bool		vbus_attached;
 	bool		vbus_always_on;
+	bool		force_vbus_valid;
 	bool		vbus_enabled;
 	bool		bypass_uart_en;
 	bool		host_disconnect;
@@ -1258,7 +1259,10 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 
 	mutex_lock(&rport->mutex);
 
-	if (rport->port_cfg->bvalid_grf_con.enable && rport->typec_vbus_det)
+	if (rport->force_vbus_valid) {
+		/* Board lacks VBUS detect, keep OTG in attached state. */
+		rport->vbus_attached = true;
+	} else if (rport->port_cfg->bvalid_grf_con.enable && rport->typec_vbus_det)
 		rport->vbus_attached =
 			property_enabled(rphy->grf, &rport->port_cfg->bvalid_grf_con);
 	else if (rport->gpio_vbus_det)
@@ -2279,6 +2283,9 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 	rport->typec_vbus_det =
 		of_property_read_bool(child_np, "rockchip,typec-vbus-det");
 
+	rport->force_vbus_valid =
+		of_property_read_bool(child_np, "rockchip,force-vbus-valid");
+
 	rport->gpio_vbus_det =
 		of_property_read_bool(child_np, "rockchip,gpio-vbus-det");
 
@@ -2361,11 +2368,15 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 	 * (high) by default.
 	 */
 	if (rport->port_cfg->bvalid_grf_sel.enable != 0) {
-		if (of_machine_is_compatible("rockchip,rv1103"))
+		if (of_machine_is_compatible("rockchip,rv1103") ||
+		    rport->force_vbus_valid)
 			property_enable(base, &rport->port_cfg->bvalid_grf_sel, true);
 		else
 			property_enable(base, &rport->port_cfg->bvalid_grf_sel, false);
 	}
+
+	if (rport->force_vbus_valid)
+		rockchip_usb2phy_usb_bvalid_enable(rport, true);
 
 	if (rport->vbus_always_on)
 		extcon_set_state(rphy->edev, EXTCON_USB, true);
