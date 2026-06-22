@@ -5,6 +5,7 @@ dma-buf-objs-y := dma-buf.o dma-fence.o dma-fence-array.o dma-fence-chain.o \
 	 dma-fence-unwrap.o dma-resv.o
 dma-buf-objs-$(CONFIG_DMABUF_HEAPS)	+= dma-heap.o
 obj-$(CONFIG_DMABUF_HEAPS)		+= heaps/
+obj-$(CONFIG_DMABUF_HEAPS_ROCKCHIP)	+= rk_heaps/
 dma-buf-objs-$(CONFIG_SYNC_FILE)	+= sync_file.o
 dma-buf-objs-$(CONFIG_SW_SYNC)		+= sw_sync.o sync_debug.o
 dma-buf-objs-$(CONFIG_UDMABUF)		+= udmabuf.o
