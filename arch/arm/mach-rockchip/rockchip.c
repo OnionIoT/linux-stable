@@ -49,7 +49,8 @@ static void __init rockchip_timer_init(void)
 static void __init rockchip_dt_init(void)
 {
 	/* The existing suspend implementation only supports the RK3288 PMU. */
-	if (!of_machine_is_compatible("rockchip,rv1103b"))
+	if (!of_machine_is_compatible("rockchip,rv1103b") &&
+	    !of_machine_is_compatible("rockchip,rv1106b"))
 		rockchip_suspend_init();
 }
 
@@ -61,6 +62,7 @@ static const char * const rockchip_board_dt_compat[] = {
 	"rockchip,rk3228",
 	"rockchip,rk3288",
 	"rockchip,rv1103b",
+	"rockchip,rv1106b",
 	"rockchip,rv1108",
 	NULL,
 };
