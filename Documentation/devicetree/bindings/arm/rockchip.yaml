@@ -15,6 +15,11 @@ properties:
   compatible:
     oneOf:
 
+      - description: Onion Omega4+ EVB (RV1106B with external DDR3)
+        items:
+          - const: onion,rv1106b-omega4p-evb
+          - const: rockchip,rv1106b
+
       - description: 96boards RK3399 Ficus (ROCK960 Enterprise Edition)
         items:
           - const: vamrs,ficus
