@@ -22,7 +22,8 @@ static int rockchip_cpuinfo_probe(struct platform_device *pdev)
 	size_t len;
 	int i;
 
-	if (!of_machine_is_compatible("rockchip,rv1103b"))
+	if (!of_machine_is_compatible("rockchip,rv1103b") &&
+	    !of_machine_is_compatible("rockchip,rv1106b"))
 		return -ENODEV;
 
 	cell = devm_nvmem_cell_get(dev, "id");

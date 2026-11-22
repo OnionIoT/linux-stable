@@ -22,3 +22,10 @@ config ARCH_ROCKCHIP
 	help
 	  Support for Rockchip ARMv7 SoCs, including the Cortex-A9
 	  RK2928/RK3xxx family and the Cortex-A7 RV1103B.
+
+config CPU_RV1103B
+	bool "RV1103B / RV1106B vendor peripheral support"
+	depends on ARCH_ROCKCHIP
+	help
+	  Enable device matches for the vendor RTC, ISP and capture drivers
+	  used on RV1103B and RV1106B boards.

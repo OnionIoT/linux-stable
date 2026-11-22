@@ -44,7 +44,7 @@ struct rk_dma_heap_ops {
 			unsigned long fd_flags,
 			unsigned long heap_flags,
 			const char *name);
-	struct page *(*alloc_contig_pages)(struct rk_dma_heap *heap,
+	struct page *(*alloc_cma_pages)(struct rk_dma_heap *heap,
 					   size_t len, const char *name);
 	void (*free_contig_pages)(struct rk_dma_heap *heap,
 				  struct page *pages, size_t len,

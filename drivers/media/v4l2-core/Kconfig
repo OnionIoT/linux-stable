@@ -9,7 +9,7 @@ config VIDEO_V4L2_I2C
 	default y
 
 config VIDEO_V4L2_SUBDEV_API
-	bool
+	bool "V4L2 sub-device userspace API"
 	depends on VIDEO_DEV && MEDIA_CONTROLLER
 	help
 	  Enables the V4L2 sub-device pad-level userspace API used to configure
@@ -68,11 +68,11 @@ config V4L2_FLASH_LED_CLASS
 	  When in doubt, say N.
 
 config V4L2_FWNODE
-	tristate
+	tristate "V4L2 firmware-node helpers for external drivers"
 	select V4L2_ASYNC
 
 config V4L2_ASYNC
-	tristate
+	tristate "V4L2 asynchronous sub-device helpers"
 
 config V4L2_CCI
 	tristate

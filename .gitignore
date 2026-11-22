@@ -178,3 +178,7 @@ sphinx_*/
 
 # Rust analyzer configuration
 /rust-project.json
+
+# OpenWrt external-kernel header staging and fortify test output
+/user_headers/
+/lib/test_fortify.log

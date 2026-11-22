@@ -22,6 +22,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/syscalls.h>
+#include <linux/vmalloc.h>
 #include <uapi/linux/rk-dma-heap.h>
 
 #include "rk-dma-heap.h"
@@ -66,8 +67,6 @@ void *rk_vmap_contig_pfn(unsigned long pfn, unsigned int count, pgprot_t prot)
 
 int rk_dma_heap_set_dev(struct device *heap_dev)
 {
-	int err = 0;
-
 	if (!heap_dev)
 		return -EINVAL;
 
@@ -80,12 +79,7 @@ int rk_dma_heap_set_dev(struct device *heap_dev)
 		if (!heap_dev->dma_parms)
 			return -ENOMEM;
 
-		err = dma_set_max_seg_size(heap_dev, (unsigned int)DMA_BIT_MASK(64));
-		if (err) {
-			devm_kfree(heap_dev, heap_dev->dma_parms);
-			dev_err(heap_dev, "Failed to set DMA segment size, err:%d\n", err);
-			return err;
-		}
+		dma_set_max_seg_size(heap_dev, (unsigned int)DMA_BIT_MASK(64));
 	}
 
 	return 0;
@@ -137,8 +131,17 @@ struct dma_buf *rk_dma_heap_buffer_alloc(struct rk_dma_heap *heap, size_t len,
 
 	dmabuf = heap->ops->allocate(heap, len, fd_flags, heap_flags, name);
 
-	if (IS_ENABLED(CONFIG_DMABUF_RK_HEAPS_DEBUG) && !IS_ERR(dmabuf))
-		dma_buf_set_name(dmabuf, name);
+	if (IS_ENABLED(CONFIG_DMABUF_RK_HEAPS_DEBUG) && !IS_ERR(dmabuf) && name) {
+		char *label = kstrdup(name, GFP_KERNEL);
+
+		/* This newly allocated buffer has not been exposed to importers yet. */
+		if (label) {
+			spin_lock(&dmabuf->name_lock);
+			kfree(dmabuf->name);
+			dmabuf->name = label;
+			spin_unlock(&dmabuf->name_lock);
+		}
+	}
 
 	return dmabuf;
 }
@@ -181,7 +184,7 @@ struct page *rk_dma_heap_alloc_contig_pages(struct rk_dma_heap *heap,
 	if (!len)
 		return ERR_PTR(-EINVAL);
 
-	return heap->ops->alloc_contig_pages(heap, len, name);
+	return heap->ops->alloc_cma_pages(heap, len, name);
 }
 EXPORT_SYMBOL_GPL(rk_dma_heap_alloc_contig_pages);
 
