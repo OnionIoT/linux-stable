@@ -822,3 +822,6 @@ obj-$(CONFIG_SND_SOC_LPASS_TX_MACRO)	+= snd-soc-lpass-tx-macro.o
 
 # Mux
 obj-$(CONFIG_SND_SOC_SIMPLE_MUX)	+= snd-soc-simple-mux.o
+
+snd-soc-rv1106-y := rv1106_codec.o
+obj-$(CONFIG_SND_SOC_RV1106) += snd-soc-rv1106.o

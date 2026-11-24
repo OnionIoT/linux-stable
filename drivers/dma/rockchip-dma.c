@@ -21,7 +21,7 @@
 
 #include "virt-dma.h"
 
-/* Initial integration exposes UART TX only; RX needs a flush-aware client. */
+/* UART TX and SAI audio; UART RX still needs a flush-aware client. */
 #define DRIVER_NAME			"rk-dma"
 #define DMA_MAX_SIZE			(0x1000000)
 #define LLI_BLOCK_SIZE			(SZ_4K)
@@ -1038,7 +1038,8 @@ static int rk_dma_config(struct dma_chan *chan, struct dma_slave_config *cfg)
 {
 	struct rk_dma_chan *c = to_rk_chan(chan);
 
-	if (!cfg || cfg->direction != DMA_MEM_TO_DEV)
+	if (!cfg || (cfg->direction != DMA_MEM_TO_DEV &&
+		     !(c->id == 10 && cfg->direction == DMA_DEV_TO_MEM)))
 		return -EINVAL;
 
 	memcpy(&c->slave_cfg, cfg, sizeof(*cfg));
@@ -1101,8 +1102,9 @@ static struct dma_chan *rk_of_dma_simple_xlate(struct of_phandle_args *dma_spec,
 
 	if (dma_spec->args_count != 1 || dma_spec->args[0] >= d->dma_requests)
 		return NULL;
-	/* TRM table 10-1: UART0/1/2 TX requests are 1/3/5. */
-	if (dma_spec->args[0] > 5 || !(dma_spec->args[0] & 1))
+	/* UART0/1/2 TX: 1/3/5; SAI RX/TX: 10/11. Keep UART RX gated. */
+	if (dma_spec->args[0] != 10 && dma_spec->args[0] != 11 &&
+	    (dma_spec->args[0] > 5 || !(dma_spec->args[0] & 1)))
 		return NULL;
 	return dma_get_slave_channel(&d->chans[dma_spec->args[0]].vc.chan);
 }
@@ -1141,6 +1143,7 @@ static int rk_dma_probe(struct platform_device *pdev)
 	spin_lock_init(&d->lock);
 	INIT_LIST_HEAD(&d->slave.channels);
 	dma_cap_set(DMA_SLAVE, d->slave.cap_mask);
+	dma_cap_set(DMA_CYCLIC, d->slave.cap_mask);
 	dma_cap_set(DMA_PRIVATE, d->slave.cap_mask);
 	d->slave.dev = &pdev->dev;
 	d->slave.device_free_chan_resources = rk_dma_free_chan_resources;
@@ -1154,7 +1157,7 @@ static int rk_dma_probe(struct platform_device *pdev)
 	d->slave.device_synchronize = rk_dma_synchronize;
 	d->slave.src_addr_widths = RK_DMA_BUSWIDTHS;
 	d->slave.dst_addr_widths = RK_DMA_BUSWIDTHS;
-	d->slave.directions = BIT(DMA_MEM_TO_DEV);
+	d->slave.directions = BIT(DMA_MEM_TO_DEV) | BIT(DMA_DEV_TO_MEM);
 	d->slave.residue_granularity = DMA_RESIDUE_GRANULARITY_DESCRIPTOR;
 
 	platform_set_drvdata(pdev, d);

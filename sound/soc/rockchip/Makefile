@@ -19,3 +19,6 @@ obj-$(CONFIG_SND_SOC_ROCKCHIP_MAX98090) += snd-soc-rockchip-max98090.o
 obj-$(CONFIG_SND_SOC_ROCKCHIP_RT5645) += snd-soc-rockchip-rt5645.o
 obj-$(CONFIG_SND_SOC_RK3288_HDMI_ANALOG) += snd-soc-rk3288-hdmi-analog.o
 obj-$(CONFIG_SND_SOC_RK3399_GRU_SOUND) += snd-soc-rk3399-gru-sound.o
+
+snd-soc-rockchip-sai-y := rockchip_sai.o
+obj-$(CONFIG_SND_SOC_ROCKCHIP_SAI) += snd-soc-rockchip-sai.o

@@ -2602,3 +2602,8 @@ config SND_SOC_LPASS_TX_MACRO
 	tristate "Qualcomm TX Macro in LPASS(Low Power Audio SubSystem)"
 
 endmenu
+
+config SND_SOC_RV1106
+	tristate "Rockchip RV1103/RV1103B/RV1106 codec"
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	select REGMAP_MMIO
